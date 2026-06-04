@@ -1,13 +1,24 @@
+/**
+ * Sistema simples de biblioteca desenvolvido em Node.js.
+ * 
+ * Funcionalidades:
+ * - Listagem de livros
+ * - Empréstimo
+ * - Devolução
+ * - Busca por título
+ */
+
 const readline = require('readline/promises');
 const { stdin: input, stdout: output } = require('process');
 
-// utilitarios
+// ===== UTILITÁRIOS =====
 const CORES = {
     reset: "\x1b[0m",
     verde: "\x1b[32m",
     vermelho: "\x1b[31m",
     amarelo: "\x1b[33m",
-    ciano: "\x1b[36m"
+    ciano: "\x1b[36m",
+    magenta: "\x1b[35m"
 };
 
 const print = (msg, cor = CORES.reset) =>
@@ -15,7 +26,7 @@ const print = (msg, cor = CORES.reset) =>
 
 const validarId = (id) => !isNaN(id) && id > 0;
 
-// autor
+// ===== MODELOS =====
 class Autor {
     constructor(id, nome) {
         this.id = id;
@@ -23,34 +34,35 @@ class Autor {
     }
 }
 
-// livro
 class Livro {
     constructor(id, titulo, autor) {
         this.id = id;
         this.titulo = titulo;
         this.autor = autor;
         this.disponivel = true;
+        this.dataCadastro = new Date().toLocaleDateString('pt-BR');
     }
 }
 
-// emprestimo
 class Emprestimo {
-    constructor(id, livro, cliente) {
+    constructor(id, livro, nomeCliente) {
         this.id = id;
         this.livro = livro;
-        this.cliente = cliente;
+        this.nomeCliente = nomeCliente;
+        this.dataEmprestimo = new Date().toLocaleDateString('pt-BR');
+        this.dataDevolucao = null;
     }
 }
 
-// biblioteca
+// ===== REGRAS DA BIBLIOTECA =====
 class BibliotecaService {
     constructor() {
         this.livros = [];
         this.emprestimos = [];
-
         this.carregarDados();
     }
 
+    // Adiciona livros iniciais
     carregarDados() {
         const tolkien = new Autor(1, "J.R.R. Tolkien");
         const orwell = new Autor(2, "George Orwell");
@@ -62,157 +74,181 @@ class BibliotecaService {
         );
     }
 
-    listarDisponiveis() {
+    // Retorna apenas livros disponíveis
+    obterDisponiveis() {
         return this.livros.filter(l => l.disponivel);
     }
 
+    // Busca livros pelo título
     buscarPorTitulo(termo) {
         return this.livros.filter(l =>
             l.titulo.toLowerCase().includes(termo.toLowerCase())
         );
     }
 
-    emprestar(id, cliente) {
-        const livro = this.livros.find(l => l.id === id);
+    // Realiza empréstimo
+    emprestarLivro(idLivro, nomeCliente) {
+        const livro = this.livros.find(l => l.id === idLivro);
 
-        if (!livro) {
-            throw new Error("Livro não encontrado.");
-        }
-
-        if (!livro.disponivel) {
-            throw new Error("Livro já emprestado.");
-        }
+        if (!livro) throw new Error("Livro não encontrado no catálogo.");
+        if (!livro.disponivel) throw new Error(`O livro "${livro.titulo}" já está emprestado.`);
 
         livro.disponivel = false;
-
-        this.emprestimos.push(
-            new Emprestimo(Date.now(), livro, cliente)
-        );
+        this.emprestimos.push(new Emprestimo(Date.now(), livro, nomeCliente));
 
         return livro;
     }
 
-    devolver(id) {
-        const livro = this.livros.find(l => l.id === id);
+    // Realiza devolução
+    devolverLivro(idLivro) {
+        const livro = this.livros.find(l => l.id === idLivro);
 
-        if (!livro) {
-            throw new Error("Livro não encontrado.");
-        }
+        if (!livro) throw new Error("Livro não encontrado no catálogo.");
+        if (livro.disponivel) throw new Error("Este livro já está disponível.");
 
+        const emprestimo = this.emprestimos.find(
+            e => e.livro.id === idLivro && !e.dataDevolucao
+        );
+        
         livro.disponivel = true;
+
+        if (emprestimo) {
+            emprestimo.dataDevolucao = new Date().toLocaleDateString('pt-BR');
+        }
 
         return livro;
     }
 }
 
-// terminal
+// ===== INTERFACE NO TERMINAL =====
 class InterfaceConsole {
     constructor() {
         this.rl = readline.createInterface({ input, output });
         this.biblioteca = new BibliotecaService();
     }
 
+    // Entrada de dados
     async perguntar(texto) {
         return await this.rl.question(`${CORES.ciano}${texto}${CORES.reset} `);
     }
 
+    // Exibe livros em tabela
     mostrarTabela(livros) {
         console.table(
             livros.map(l => ({
                 ID: l.id,
-                Titulo: l.titulo,
-                Autor: l.autor.nome,
+                Título: l.titulo,
+                Autor: l.autor?.nome || "-",
                 Status: l.disponivel ? "Disponível" : "Emprestado"
             }))
         );
     }
 
+    // Lista livros disponíveis
+    fluxoListar() {
+        const disponiveis = this.biblioteca.obterDisponiveis();
+
+        if (!disponiveis.length) {
+            return print("\n[!] Nenhum livro disponível.", CORES.amarelo);
+        }
+
+        this.mostrarTabela(disponiveis);
+    }
+
+    // Fluxo de empréstimo
+    async fluxoEmprestar() {
+        this.mostrarTabela(this.biblioteca.obterDisponiveis());
+
+        const idEmp = parseInt(await this.perguntar("\nID do livro:"));
+        
+        if (!validarId(idEmp)) {
+            return print("[ERRO] ID inválido.", CORES.vermelho);
+        }
+
+        const nome = await this.perguntar("Seu nome:");
+
+        if (!nome.trim()) {
+            return print("[ERRO] Nome obrigatório.", CORES.vermelho);
+        }
+
+        try {
+            const livro = this.biblioteca.emprestarLivro(idEmp, nome.trim());
+
+            print(`\n[OK] "${livro.titulo}" emprestado para ${nome.trim()}!`, CORES.verde);
+
+        } catch (e) {
+            print(`\n[ERRO] ${e.message}`, CORES.vermelho);
+        }
+    }
+
+    // Fluxo de devolução
+    async fluxoDevolver() {
+        const idDev = parseInt(await this.perguntar("\nID do livro para devolução:"));
+        
+        if (!validarId(idDev)) {
+            return print("[ERRO] ID inválido.", CORES.vermelho);
+        }
+
+        try {
+            const livroDev = this.biblioteca.devolverLivro(idDev);
+
+            print(`\n[OK] "${livroDev.titulo}" devolvido com sucesso!`, CORES.verde);
+
+        } catch (e) {
+            print(`\n[ERRO] ${e.message}`, CORES.vermelho);
+        }
+    }
+
+    // Fluxo de busca
+    async fluxoBuscar() {
+        const termo = await this.perguntar("\nTítulo do livro:");
+        const resultados = this.biblioteca.buscarPorTitulo(termo.trim());
+
+        if (!resultados.length) {
+            return print(`\n[BUSCA] Nada encontrado para "${termo}".`, CORES.vermelho);
+        }
+
+        this.mostrarTabela(resultados);
+    }
+
+    // Menu principal
     async executar() {
+        print("\n================================", CORES.verde);
+        print("      SISTEMA DE BIBLIOTECA     ", CORES.verde);
+        print("================================", CORES.verde);
+
         while (true) {
-            print("\n1 - listar", CORES.ciano);
-            print("2 - emprestar", CORES.ciano);
-            print("3 - devolver", CORES.ciano);
-            print("4 - buscar", CORES.ciano);
-            print("5 - sair", CORES.ciano);
+            print(
+                "\nMenu: [1] Listar | [2] Emprestar | [3] Devolver | [4] Buscar | [5] Sair",
+                CORES.ciano
+            );
 
-            const opcao = await this.perguntar("Escolha:");
+            const opcao = await this.perguntar("Escolha uma opção:");
 
-            switch (opcao) {
+            switch (opcao.trim()) {
                 case '1':
-                    this.mostrarTabela(
-                        this.biblioteca.listarDisponiveis()
-                    );
+                    this.fluxoListar();
                     break;
 
                 case '2':
-                    const idEmp = parseInt(
-                        await this.perguntar("ID:")
-                    );
-
-                    if (!validarId(idEmp)) {
-                        print("ID inválido.", CORES.vermelho);
-                        break;
-                    }
-
-                    const cliente = await this.perguntar("Nome:");
-
-                    try {
-                        const livro = this.biblioteca.emprestar(
-                            idEmp,
-                            cliente
-                        );
-
-                        print(
-                            `Livro "${livro.titulo}" emprestado.`,
-                            CORES.verde
-                        );
-
-                    } catch (e) {
-                        print(e.message, CORES.vermelho);
-                    }
-
+                    await this.fluxoEmprestar();
                     break;
 
                 case '3':
-                    const idDev = parseInt(
-                        await this.perguntar("ID:")
-                    );
-
-                    if (!validarId(idDev)) {
-                        print("ID inválido.", CORES.vermelho);
-                        break;
-                    }
-
-                    try {
-                        const livro = this.biblioteca.devolver(idDev);
-
-                        print(
-                            `Livro "${livro.titulo}" devolvido.`,
-                            CORES.verde
-                        );
-
-                    } catch (e) {
-                        print(e.message, CORES.vermelho);
-                    }
-
+                    await this.fluxoDevolver();
                     break;
 
                 case '4':
-                    const termo = await this.perguntar("Buscar:");
-
-                    const resultados =
-                        this.biblioteca.buscarPorTitulo(termo);
-
-                    this.mostrarTabela(resultados);
-
+                    await this.fluxoBuscar();
                     break;
 
                 case '5':
+                    print("\n[OK] Sistema encerrado com sucesso!", CORES.verde);
                     this.rl.close();
                     return;
 
                 default:
-                    print("Opção inválida.", CORES.vermelho);
+                    print("\n[ERRO] Opção inválida. Digite de 1 a 5.", CORES.vermelho);
             }
         }
     }
